@@ -1,0 +1,8 @@
+# idea
+.idea
+
+# python venv
+venv
+
+# sqlite3
+*.db
