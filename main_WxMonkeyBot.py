@@ -2,11 +2,15 @@ import re
 import time
 import random
 import sqlite3
-
 import pywinauto.controls.uia_controls
 from pywinauto import application, handleprops, timings
 
-reply_keyword = "小香菜"
+# 配置
+# 触发关键词
+reply_keyword = "@小香菜"
+# 轮询间隔秒
+sleep_sec = 1
+
 
 # 返回单独的微信聊天窗口消息，返回列表
 class GetWxMsg:
@@ -103,7 +107,7 @@ class GetWxMsg:
             elif i["msg_type"] == "时间":
                 pass
             elif i["msg_type"] == "未知类型":
-                # print("===WARNING: 未知类型===", i)
+                # print("[WARN] 未知类型消息：", i)
                 pass
         return sort_result
 
@@ -111,27 +115,27 @@ class GetWxMsg:
     def do(self):
         pid = self.__get_process_id(name=self.program_name)
         if pid is None:
-            print("===ERROR: " + self.program_name + " 未启动===")
+            print("[ERROR] " + self.program_name + " 未启动")
             return -1
         dialogs, app = self.__get_app_instance(pid=pid)
-        result = []
+        r = []
         for i in dialogs:
             if handleprops.classname(i) == "ChatWnd":
                 chat_room = handleprops.text(i)
-                print("开始搜索聊天窗口消息：", chat_room + "...")
+                print("[INFO] 开始搜索聊天窗口消息：", chat_room + "...")
                 msg_spec = app.window(class_name=handleprops.classname(i), title=handleprops.text(i)).child_window(
                     title="消息")
                 msg_wrapper = msg_spec.wrapper_object()
                 parse_result = self.__parse_msg_wrapper(msg_wrapper=msg_wrapper)
                 msg_list = self.__sort_msg_data(parse_result=parse_result)
-                result.append({
+                r.append({
                     "chat_room": chat_room,
                     "msg_list": msg_list
                 })
-        return result
+        return r
 
 
-class MsgDB:
+class MsgDAO:
     store = []
 
     def __init__(self):
@@ -150,11 +154,12 @@ class MsgDB:
         self.conn.commit()
 
     def update_db(self, data):
-        new_msg_count = 0
-        for i in data:
-            chat_room = i["chat_room"]
-            i["msg_list"].reverse()
-            for j in i["msg_list"]:
+        new_count = 0
+        for each_chat in data:
+            chat_room = each_chat["chat_room"]
+            each_chat["msg_list"].reverse()
+            count = 0
+            for j in each_chat["msg_list"]:
                 msg_type = j["msg_type"]
                 sender = j["sender"]
                 msg = j["msg"]
@@ -168,15 +173,16 @@ class MsgDB:
                                         VALUES ("{chat_room}", "{msg_type}", "{sender}", "{msg}", "{int(time.time())}");'''
                     self.c.execute(sql2)
                     self.conn.commit()
-                    new_msg_count += 1
+                    count += 1
                 else:
                     # 因为列表是反向的，所以一旦有重复，那就不要继续查找了，接下来都是重复的
+                    new_count += count
                     break
-        print(f"===INFO: 新消息数 {new_msg_count}===")
-        return new_msg_count
+            print(f"[INFO] 来自“{chat_room}”的新消息数：{count}条")
+        return new_count
 
 
-class ReplyWxMsg:
+class ReplyMsgMonkey:
     def __init__(self):
         self.conn = sqlite3.connect('store.db')
         self.c = self.conn.cursor()
@@ -200,17 +206,19 @@ class ReplyWxMsg:
                 _dialogs.append(dialog)
         return _dialogs, _app
 
+    # 检查有没有需要回复的消息
     def interval_check_msg(self):
         sql = f'''SELECT * FROM 
          (SELECT * FROM MESSAGE ORDER BY id desc LIMIT 5) temp
-         WHERE temp.msg LIKE "@{reply_keyword}%" AND temp.flag_1 IS NULL;'''
+         WHERE temp.msg LIKE "%{reply_keyword}%" AND temp.flag_1 IS NULL;'''
         res = self.c.execute(sql).fetchall()
         return res
 
+    # 执行回复消息逻辑
     def do(self, id, chat_room, sender, original_msg):
         pid = self.__get_process_id(name="WeChat.exe")
         if pid is None:
-            print("===ERROR: WeChat.exe 未启动===")
+            print("[ERROR] WeChat.exe 未启动")
             return -1
         dialogs, app = self.__get_app_instance(pid=pid)
         edit_box = None
@@ -228,26 +236,33 @@ class ReplyWxMsg:
                                 break
                 if edit_box is not None:
                     break
+
+        if edit_box is None:
+            return -1
+
         # 模拟键盘输入信息
         timings.Timings.slow()
         edit_box.type_keys("^a")
         edit_box.type_keys("{BACKSPACE}")
         timings.Timings.defaults()
-        search_key = str(original_msg).replace('@'+reply_keyword, '').strip()
-        print(search_key)
-        if len(search_key) > 6:
+
+        # 准备回复内容
+        search_key = str(original_msg).replace(reply_keyword, '').strip().replace(' ', '')
+        if len(search_key) > 5:
             search_key = search_key[0: 4]
         _sql1 = f'''SELECT * FROM QA_Library WHERE Q LIKE "%{search_key}%" OR A LIKE "%{search_key}%";'''
-        print(_sql1)
+        print("[INFO] ", _sql1)
         answers = self.c.execute(_sql1).fetchall()
-        print("回答命中", answers)
+        print("[INFO] 回答命中候选数量：", len(answers))
         if len(answers) > 0:
             answer = answers[random.randint(0, len(answers)-1)]
-            edit_box.type_keys(f"{answer[1]} {answer[2]}", with_spaces=True)
+            a_1 = str(answer[1]).strip().replace('`', '').replace('~', '').replace('+', '').replace('%', '').replace('^', '')
+            a_2 = str(answer[2]).strip().replace('`', '').replace('~', '').replace('+', '').replace('%', '').replace('^', '')
+            edit_box.type_keys(f"{a_1}，{a_2}", with_spaces=True)
         else:
-            edit_box.type_keys("我好像不明白。", with_spaces=True)
-        edit_box.type_keys("{VK_SHIFT down}{ENTER}{VK_SHIFT up}------{VK_SHIFT down}{ENTER}{VK_SHIFT up}", with_spaces=True)
-        edit_box.type_keys(f"@{sender}", with_spaces=True)
+            edit_box.type_keys("=。=", with_spaces=True)
+        edit_box.type_keys("{VK_SHIFT down}{ENTER}{VK_SHIFT up}", with_spaces=True)
+        edit_box.type_keys(f"@{sender}  ", with_spaces=True)
         edit_box.type_keys("{ENTER}")
         edit_box.type_keys("{ENTER}")
         timings.Timings.slow()
@@ -256,16 +271,28 @@ class ReplyWxMsg:
 
 
 if __name__ == '__main__':
-    msg = GetWxMsg("WeChat.exe")
-    msg_db = MsgDB()
-    reply_wx_msg = ReplyWxMsg()
+    getWxMsg = GetWxMsg("WeChat.exe")
+    msgDAO = MsgDAO()
+    replyMsgMonkey = ReplyMsgMonkey()
     while True:
-        result = msg.do()
-        msg_db.update_db(result)
-        print(result)
-        task = reply_wx_msg.interval_check_msg()
-        print(task)
-        for i in task:
-            reply_wx_msg.do(id=i[0], chat_room=i[1], sender=i[3], original_msg=i[4])
-        print("===INFO: 等待2秒===")
-        time.sleep(2)
+        # 监听消息
+        msg_list = getWxMsg.do()
+        # 存入数据库（带去重）
+        new_msg_count = msgDAO.update_db(msg_list)
+
+        print("\n[INFO] ---")
+        print(f"[INFO] 总新消息数：{new_msg_count}条")
+
+        # 检查有没有人叫我
+        reply_task = replyMsgMonkey.interval_check_msg()
+
+        if len(reply_task) != 0:
+            print("[INFO] 回复以下消息：", reply_task)
+
+        # 如果有人叫我，就回复信息
+        for i in reply_task:
+            replyMsgMonkey.do(id=i[0], chat_room=i[1], sender=i[3], original_msg=i[4])
+
+        # 循环
+        print("[INFO] ---\n")
+        time.sleep(sleep_sec)
