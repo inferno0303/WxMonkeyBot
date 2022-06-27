@@ -22,7 +22,7 @@
 
 ## 安装依赖
 
-需要Python 3.7以上版本，推荐在virtualvenv下运行
+Recommend Python3.7 or latest，virtualenv
 
 ```bash
 git clone https://github.com/inferno0303/WxMonkeyBot.git
