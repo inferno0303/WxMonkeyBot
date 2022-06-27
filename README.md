@@ -1,7 +1,7 @@
 # 微信猴子机器人 - WxMonkeyBot
 
-> 版本：v0.1  
-> 作者：inferno0303@github
+> 版本：v0.1.1  
+> 作者：inferno0303@github  
 > 开源许可证：MIT License
 
 **实现了在Windows上自动 ⌈读取、回复⌋ 微信消息**  
@@ -98,4 +98,4 @@ python WxMonkeyBot.py
 - fix(main_WxMonkeyBot.py): 修复一些意外退出的问题
 - fix(utils_DBImport.py): 优化运行时信息显示
 - docs(README.md): 完善README
-- add(LICENSE)
+- add(LICENSE): MIT LICENSE
